@@ -1,6 +1,6 @@
 { config, lib, pkgs, ... }:
 
-let 
+let
   cfg = config.hardware.raspberry-pi."4".poe-hat;
 in {
   options.hardware = {
@@ -15,7 +15,7 @@ in {
     # Configure for modesetting in the device tree
     hardware.deviceTree = {
       overlays = [
-        # Equivalent to: https://github.com/raspberrypi/linux/blob/rpi-5.10.y/arch/arm/boot/dts/overlays/rpi-poe-overlay.dts
+        # Equivalent to: https://github.com/raspberrypi/linux/blob/rpi-5.15.y/arch/arm/boot/dts/overlays/rpi-poe-overlay.dts
         {
           name = "rpi-poe-overlay";
           dtsText = ''
@@ -26,19 +26,16 @@ in {
             /plugin/;
 
             / {
-              compatible = "brcm,bcm2711";
+              compatible = "raspberrypi,4-model-b", "brcm,bcm2711";
 
               fragment@0 {
                 target-path = "/";
                 __overlay__ {
-                  fan0: rpi-poe-fan@0 {
-                    compatible = "raspberrypi,rpi-poe-fan";
-                    firmware = <&firmware>;
-                    cooling-min-state = <0>;
-                    cooling-max-state = <4>;
-                    #cooling-cells = <2>;
+                  fan: pwm-fan {
+                    compatible = "pwm-fan";
                     cooling-levels = <0 1 10 100 255>;
-                    status = "okay";
+                    #cooling-cells = <2>;
+                    pwms = <&fwpwm 0 80000>;
                   };
                 };
               };
@@ -71,19 +68,19 @@ in {
                   cooling-maps {
                     map0 {
                       trip = <&trip0>;
-                      cooling-device = <&fan0 0 1>;
+                      cooling-device = <&fan 0 1>;
                     };
                     map1 {
                       trip = <&trip1>;
-                      cooling-device = <&fan0 1 2>;
+                      cooling-device = <&fan 1 2>;
                     };
                     map2 {
                       trip = <&trip2>;
-                      cooling-device = <&fan0 2 3>;
+                      cooling-device = <&fan 2 3>;
                     };
                     map3 {
                       trip = <&trip3>;
-                      cooling-device = <&fan0 3 4>;
+                      cooling-device = <&fan 3 4>;
                     };
                   };
                 };
@@ -91,7 +88,7 @@ in {
 
               fragment@2 {
                 target-path = "/__overrides__";
-                __overlay__ {
+                params: __overlay__ {
                   poe_fan_temp0 =		<&trip0>,"temperature:0";
                   poe_fan_temp0_hyst =	<&trip0>,"hysteresis:0";
                   poe_fan_temp1 =		<&trip1>,"temperature:0";
@@ -100,6 +97,54 @@ in {
                   poe_fan_temp2_hyst =	<&trip2>,"hysteresis:0";
                   poe_fan_temp3 =		<&trip3>,"temperature:0";
                   poe_fan_temp3_hyst =	<&trip3>,"hysteresis:0";
+                  poe_fan_i2c =		<&fwpwm>,"status=disabled",
+                        <&poe_mfd>,"status=okay",
+                        <&fan>,"pwms:0=",<&poe_mfd_pwm>;
+                };
+              };
+
+              fragment@3 {
+                target = <&firmware>;
+                __overlay__ {
+                  fwpwm: pwm {
+                    compatible = "raspberrypi,firmware-poe-pwm";
+                    #pwm-cells = <2>;
+                  };
+                };
+              };
+
+              fragment@4 {
+                target = <&i2c0>;
+                i2c_bus: __overlay__ {
+                  #address-cells = <1>;
+                  #size-cells = <0>;
+
+                  poe_mfd: poe@51 {
+                    compatible = "raspberrypi,poe-core";
+                    reg = <0x51>;
+                    status = "disabled";
+
+                    poe_mfd_pwm: poe_pwm@f0 {
+                      compatible = "raspberrypi,poe-pwm";
+                      reg = <0xf0>;
+                      status = "okay";
+                      #pwm-cells = <2>;
+                    };
+                  };
+                };
+              };
+
+              fragment@5 {
+                target = <&i2c0if>;
+                __dormant__ {
+                  status = "okay";
+                };
+              };
+
+              fragment@6 {
+                target = <&i2c0mux>;
+                __dormant__ {
+                  status = "okay";
                 };
               };
 
@@ -112,6 +157,11 @@ in {
                 poe_fan_temp2_hyst =	<&trip2>,"hysteresis:0";
                 poe_fan_temp3 =		<&trip3>,"temperature:0";
                 poe_fan_temp3_hyst =	<&trip3>,"hysteresis:0";
+                i2c =			<0>, "+5+6",
+                      <&fwpwm>,"status=disabled",
+                      <&i2c_bus>,"status=okay",
+                      <&poe_mfd>,"status=okay",
+                      <&fan>,"pwms:0=",<&poe_mfd_pwm>;
               };
             };
           '';
